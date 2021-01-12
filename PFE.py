@@ -194,10 +194,10 @@ def position(data_ext: float, data_room: float, data_confort: float, data_gap: f
         return None
     
     elif data_room > brone_sup and data_ext <= borne_inf:
-        return "Reduire chauffage"
+        return "Reduire chauffage 1"
     
     elif data_room > brone_sup and borne_inf < data_ext:
-        return "Reduire chauffage"
+        return "Reduire chauffage 2"
     
     
     return None
