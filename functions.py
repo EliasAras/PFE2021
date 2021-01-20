@@ -10,6 +10,7 @@ import pandas as pd
 import datetime
 import numpy as np
 
+
 #%%Calcul frequence
 def frequency_std_database(data: pd.core.frame.DataFrame):
     """Lors du calcul de le frequence:
@@ -289,9 +290,6 @@ def formatage_conseil(data: dict, data_freq: datetime.datetime, data_std: dateti
                 analyse[name][-1][1] = data[name][index-1][0]
                 analyse[name].append([data[name][index][0], "", data[name][index][1]])
                 
-                if name == "Salle A.2.1":
-                        print(data[name][index][0], data[name][index-1][0])
-                
             index += 1
             
         analyse[name][-1][1] = data[name][index-1][0]
@@ -303,3 +301,86 @@ def formatage_conseil(data: dict, data_freq: datetime.datetime, data_std: dateti
     
     """        
     return analyse
+
+#%%Retourne Error + Display
+
+def is_error_occurs(data: pd.core.frame.DataFrame, hours_begin: datetime.datetime, hours_end: datetime.datetime, colonne_date: str):
+    hours_index = list()
+    
+    for index in range(len(data)):
+        if hours_end >= data[colonne_date][index] >= hours_begin :      
+            hours_index.append(index)
+    
+    
+    data_hours = data.loc[hours_index,:]
+    data_hours = data_hours.reset_index(drop=True)
+    
+    return data_hours
+
+def ratio_error_between_date(data: pd.core.frame.DataFrame, analyse_data: dict, name: str, conseil: str, date_start: datetime.datetime, date_end: datetime.datetime, colonne_date: str):
+    nb = 0
+    total = 0
+    
+    for index in range(len(data)):
+        if date_end >= data[colonne_date][index] >= date_start: 
+            total += 1
+    
+    for index in range(len(analyse_data[name])):
+        
+        if date_end >= analyse_data[name][index][0] >= date_start:
+            if conseil == analyse_data[name][index][1]:
+                nb += 1
+     
+    if total == 0:
+        return 0
+    
+    return nb/total
+
+
+def display(data:  pd.core.frame.DataFrame, analyse: dict, analyse_point: dict, name_room:str, confort_temp:float, gap_confort:float, colonne_date:str):
+    import matplotlib.pyplot as plt
+    
+    erreur_list=list(analyse.get(name_room))
+    
+    indice = 'A'
+    
+    while indice != "A":
+        indice = input("Choissisez un probleme entre 0 et " + str(len(erreur_list)-1) + " :")
+        
+        if not indice.isdigit():
+            continue
+        
+        if 0 <= int(indice) < len(erreur_list):
+            indice = int(indice)
+            break
+    
+    if str(indice) == "A":
+        indice = 0
+    
+    data_error_occurs = is_error_occurs(data, erreur_list[indice][0], erreur_list[indice][1], colonne_date)
+
+    fig, ax = plt.subplots(figsize=(8,6))
+
+    plt.plot(data_error_occurs[colonne_date], data_error_occurs[name_room])
+    
+    value_conf_inf = [confort_temp*(1-gap_confort) for _ in range(len(data_error_occurs[colonne_date]))]
+    value_conf_sup = [confort_temp*(1+gap_confort) for _ in range(len(data_error_occurs[colonne_date]))]
+    
+    plt.plot(data_error_occurs[colonne_date], np.array([value_conf_inf, value_conf_sup]).T)
+    
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Temperature')
+    ax.set_title('')
+    plt.legend(['T°C ' + name_room, 'T°C confort inferieur', 'T°C confort superieur'],loc='lower right')
+    
+    plt.grid()
+    plt.show()
+    
+    ratio = ratio_error_between_date(data, analyse_point, name_room, erreur_list[indice][2], erreur_list[indice][0], erreur_list[indice][1], colonne_date)
+    
+    print("Debut - Fin :", erreur_list[indice][0], "-", erreur_list[indice][1])
+    print("Pourcentage d\'incident sur cette période {0:.1%}".format(ratio))
+    print("Conseil : ", erreur_list[indice][2])
+    
+    
+    

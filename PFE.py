@@ -37,7 +37,7 @@ del index, name, value, name_capteur
 #%%
 
 frequence, standard_deviation = frequency_std_database(df[DATE_COLONNE])
-standard_deviation = datetime.timedelta(days=4)
+standard_deviation = datetime.timedelta(days=8)
 #%%   
 #df.plot.line(x = DATE_COLONNE, y = name_capteur)
 
@@ -81,19 +81,14 @@ Il faudra detecter le type de chaque colonne
 """
 
 #%% Moving average 
-
-data_norm = data_open_hours.copy()
     
 #use n previous periods to calculate moving average 
 n=7*24
 
-moving_average_room = moving_average(data_norm[temp_room], n)
-moving_average_exterieur = moving_average(data_norm[TEMP_EXT], n)
-moving_average_time = data_norm[DATE_COLONNE][(n-1):]
+moving_average_room = moving_average(data_open_hours[temp_room], n)
+moving_average_exterieur = moving_average(data_open_hours[TEMP_EXT], n)
+moving_average_time = data_open_hours[DATE_COLONNE][(n-1):]
 
-#%% Analyse des donées avec consels
-"""Ouverture"""
-    
 #On analyse les movings average
 moving_average_time = moving_average_time.values
 #Reshape pour avoir un tableau en 2D (nb_data, 1)
@@ -104,110 +99,26 @@ moving_average_analyse = pd.DataFrame(data = moving_average_analyse,
                                       index = [i for i in range(len(moving_average_analyse))],  
                                       columns = [DATE_COLONNE] + temp_room + [TEMP_EXT])
 
+del moving_average_time, moving_average_room, moving_average_exterieur
+#%% Analyse des donées avec consels
+"""Ouverture"""
+
 #Provisoire
 temp_confort = {name:20 for name in df.columns}
 gap_to_confort = {name:0.05 for name in df.columns}
 
 #analyse_data_by_point = analyse_temperature_point(moving_average_analyse, temp_confort, gap_to_confort)
-analyse_data_by_point_open = analyse_temperature_point(data_norm[[DATE_COLONNE] + temp_room+ [TEMP_EXT]], temp_confort, gap_to_confort, conseil_open, TEMP_EXT, DATE_COLONNE)
+analyse_data_by_point_open = analyse_temperature_point(data_open_hours[[DATE_COLONNE] + temp_room+ [TEMP_EXT]], temp_confort, gap_to_confort, conseil_open, TEMP_EXT, DATE_COLONNE)
 analyse_data_by_point_holidays = analyse_temperature_point(data_closed_hours[[DATE_COLONNE] + temp_room+ [TEMP_EXT]], temp_confort, gap_to_confort, conseil_closed, TEMP_EXT, DATE_COLONNE)
 
 analyse_data_open = formatage_conseil(analyse_data_by_point_open, frequence, standard_deviation)
 analyse_data_holidyas = formatage_conseil(analyse_data_by_point_holidays, frequence, standard_deviation)
 
 
-del moving_average_time, moving_average_room, moving_average_exterieur
-#%%
-"""Closed""" 
-
-def analyse_pre_post_open(data: dict):
-    conseil = dict
-    keys_ = list(data.keys())
-    
-    if type(data[list(data.keys())[0]]) is dict:
-        
-        for key in keys_:
-            data_sorted = sorted(data[key]['open'])
-            if data[key]['open'][-1]:
-                pass
-        
-    else:
-        pass
-            
-
 #%%
 
-def is_error_occurs(data: pd.core.frame.DataFrame, hours_begin: datetime.datetime, hours_end: datetime.datetime):
-    hours_index = list()
-    
-    for index in range(len(data)):
-        if hours_end >= data[DATE_COLONNE][index] >= hours_begin :      
-            hours_index.append(index)
-    
-    
-    data_hours = data.loc[hours_index,:]
-    data_hours = data_hours.reset_index(drop=True)
-    
-    return data_hours
-
-def ratio_error_between_date(name: str, conseil: str, date_start: datetime.datetime, date_end: datetime.datetime):
-    nb = 0
-    total = 0
-    
-    data = data_norm.copy()
-    
-    for index in range(len(data)):
-        if date_end >= data[DATE_COLONNE][index] >= date_start: 
-            total += 1
-            
-    del data
-    
-    data = analyse_data_by_point_open.copy()
-    
-    for index in range(len(data[name])):
+#%%
         
-        if date_end >= data[name][index][0] >= date_start:
-            if conseil == data[name][index][1]:
-                nb += 1
-     
-    if total == 0:
-        return 0
-    
-    return nb/total
-
-
-def display(data, name_room:str, confort_temp:float, gap_confort:float, colonne_date:str):
-    erreur_list=list(data.get(name_room))
-    
-    indice = 11
-    data_error_occurs = is_error_occurs(data_open_hours, erreur_list[indice][0], erreur_list[indice][1])
-
-    fig, ax = plt.subplots(figsize=(8,6))
-
-    plt.plot(data_error_occurs[colonne_date], data_error_occurs[name_room])
-    
-    value_conf_inf = [confort_temp*(1-gap_confort) for _ in range(len(data_error_occurs[colonne_date]))]
-    value_conf_sup = [confort_temp*(1+gap_confort) for _ in range(len(data_error_occurs[colonne_date]))]
-    
-    plt.plot(data_error_occurs[colonne_date], np.array([value_conf_inf, value_conf_sup]).T)
-    
-    ax.set_xlabel('Date')
-    ax.set_ylabel('Temperature')
-    ax.set_title('')
-    plt.legend(['T°C ' + name_room, 'T°C confort inferieur', 'T°C confort superieur'],loc='lower right')
-    
-    plt.grid()
-    plt.show()
-    
-    ratio = ratio_error_between_date(name_room, erreur_list[indice][2], erreur_list[indice][0], erreur_list[indice][1])
-    
-    print("Debut - Fin :", erreur_list[indice][0], "-", erreur_list[indice][1])
-    print("Pourcentage d\'incident sur cette période {0:.1%}".format(ratio))
-    print("Conseil : ", erreur_list[indice][2])
-    
-    
-    
-    
 name = "Salle A.2.1"
-display(analyse_data_open, name, temp_confort[name], gap_to_confort[name], DATE_COLONNE)
-display(analyse_data_holidyas, name, temp_confort[name], gap_to_confort[name], DATE_COLONNE)
+display(data_open_hours, analyse_data_open, analyse_data_by_point_open, name, temp_confort[name], gap_to_confort[name], DATE_COLONNE)
+display(data_closed_days, analyse_data_holidyas, analyse_data_by_point_holidays, name, temp_confort[name], gap_to_confort[name], DATE_COLONNE)
