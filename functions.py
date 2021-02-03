@@ -171,58 +171,91 @@ def moving_average(data: pd.core.frame.DataFrame, period: int):
 
 #%% Analyse
 
-def analyse_temperature_point(data: pd.core.frame.DataFrame, confort_temp: dict, gap: dict, function, Temp_Ext_Name: str, Date_Colonne: str):
-    column_display = list(data.columns)
-    
-    if Temp_Ext_Name in column_display: column_display.remove(Temp_Ext_Name)
-    if Date_Colonne in column_display: column_display.remove(Date_Colonne)
-    
+def analyse_temperature_point(full_data: pd.core.frame.DataFrame, data: pd.core.frame.DataFrame, column_display, confort_temp: dict, gap: dict, function, Temp_Ext_Name: str, Date_Colonne: str, association: dict):    
     #On crée un dict de dict
     tache = {name : [] for name in column_display}
     
-    a = 0
-    
     for name in column_display:
-        a = 0
         for index in range(len(data)):
-            conseil = function(data[Temp_Ext_Name][index], data[name][index], confort_temp[name], gap[name])
-            if conseil is not None:
-                tache[name].append([data[Date_Colonne][index], conseil])
-            else:
-                a += 1
-    
-        #print(name, a)
+            anomalie = function(data[Temp_Ext_Name][index], data[name][index], confort_temp[name], gap[name], is_heater_on(full_data, association, data[Date_Colonne][index], name, Date_Colonne))
+            if anomalie is not None:
+                tache[name].append([data[Date_Colonne][index], anomalie])
             
     return tache
 
-def conseil_open(data_ext: float, data_room: float, data_confort: float, data_gap: float):
+def is_heater_on(full_data: pd.core.frame.DataFrame, association: dict, date_observation: datetime.datetime, name:str, colonne_date: str):
+    index = full_data[full_data[colonne_date] == date_observation].index.tolist()[0]
+    
+    if name in association.keys():
+        relation_circuit = association[name]
+          
+        if index > 0:
+            if full_data[relation_circuit][index-1:index].mean() > 30 :
+                return True
+            else:
+                return False
+        else:
+            return full_data[relation_circuit][index] > 30
+    else:
+        return False
+        
+def anomalie_open(data_ext: float, data_room: float, data_confort: float, data_gap: float, heater: bool):
     borne_inf = data_confort * (1-data_gap)
     borne_sup = data_confort * (1+data_gap)
+        
+    if data_room < borne_inf and data_ext < borne_inf:
+        if heater:
+            return None
+        else:
+            return "Le batiment est ouvert, le chauffage est éteint alors que la température de la pièce est trop basse."
     
-    
-    if data_ext < borne_inf and data_room < borne_inf:
-        return "Need to warm the place"
-            
-    elif (data_room < borne_inf <= data_ext ):
-        return "Reduire Clim"
-    
-    elif (data_room > borne_inf and data_room <= borne_sup):
+    elif data_room > borne_sup and data_ext < borne_inf:
+        if heater:
+            return "Le batiment est ouvert, le chauffage est allumé alors que la température de la pièce est trop haute."
+        else:
+            return None
+        
+    elif data_room >= borne_inf and data_ext < borne_inf:
         return None
     
-    elif data_room > borne_sup and data_ext <= borne_inf:
-        return "Reduire chauffage"
     
-    elif data_room > borne_sup and borne_inf < data_ext:
-        return "Reduire chauffage ou clim"
-        #vérifier circuit de chauffe si actif
+    if data_room < borne_inf and borne_inf <= data_ext < borne_sup:
+        if heater:
+            return "Le batiment est ouvert, le chauffage est allumé et la température de la pièce est trop basse."
+        else:
+            return "Le batiment est ouvert, le chauffage est éteint alors que la température de la pièce est trop basse."
+    
+    elif data_room > borne_sup and borne_inf <= data_ext < borne_sup:
+        if heater:
+            return None
+        else:
+            return "Le batiment est ouvert, le chauffage est allumé alors que la température de la pièce est trop haute."
+        
+    elif data_room >= borne_inf and borne_inf <= data_ext < borne_sup:
+        return None
+        
+    
+    if data_room < borne_inf and data_ext >= borne_sup:
+        return "Le batiment est ouvert, le chauffage est allumé et la température de la pièce est trop basse."
+    
+    elif data_room > borne_sup and data_ext >= borne_sup:
+        if heater:    
+            return "Le batiment est ouvert, le chauffage est allumé alors que la température de la pièce est trop haute."
+        else:
+            return None
+        
+    elif data_room >= borne_inf and data_ext >= borne_sup:
+        return None
     
     
     return None
 
-def conseil_closed(data_ext: float, data_room: float, data_confort: float, data_gap: float):
+def anomalie_closed(data_ext: float, data_room: float, data_confort: float, data_gap: float, heater: bool):
     borne_inf = data_confort * (1-data_gap)
     borne_sup = data_confort * (1+data_gap)
     
+    if heater:
+        return "Le batiment est fermé et le chauffage est allumé"
     
     if data_room < borne_inf and data_ext < borne_inf:
         if data_room > data_ext:
@@ -231,17 +264,17 @@ def conseil_closed(data_ext: float, data_room: float, data_confort: float, data_
             return None
     
     elif data_room > borne_sup and data_ext < borne_inf:
-        return "Chauffage trop fort"
+        return "Le batiment est fermé, le chauffage est éteint et la température de la salle est trop élevée par rapport à la température extérieur"
         
     elif data_room >= borne_inf and data_ext < borne_inf:
-        return "Chauffage allumé alors que le batiment est fermé"
+        return "Le batiment est fermé, le chauffage est éteint et la température de la salle est trop élevée par rapport à la température extérieur"
     
     
     if data_room < borne_inf and borne_inf <= data_ext < borne_sup:
         return None
     
     elif data_room > borne_sup and borne_inf <= data_ext < borne_sup:
-        return "Chauffage encore allumé"
+        return "Le batiment est fermé, le chauffage est éteint et la température de la salle est trop élevée par rapport à la température extérieur"
         
     elif data_room >= borne_inf and borne_inf <= data_ext < borne_sup:
         if data_room > data_ext:
@@ -251,23 +284,23 @@ def conseil_closed(data_ext: float, data_room: float, data_confort: float, data_
         
     
     if data_room < borne_inf and data_ext >= borne_sup:
-        return "Climatisation encore allumé"
+        return None
     
     elif data_room > borne_sup and data_ext >= borne_sup:
         if data_room > data_ext:
-            return "Chauffage allumé"
+            return None
         else:
             return None
         
     elif data_room >= borne_inf and data_ext >= borne_sup:
-        return "Climatisation allumé"
+        return None
     
     
     return None
 
-def formatage_conseil(data: dict, data_freq: datetime.datetime, data_std: datetime.datetime):
+def formatage_probleme(data: dict, data_freq: datetime.datetime, data_std: datetime.datetime):
     """ data doit être strcuturé comme ci dessous
-    nom_piece : [[date1, conseil1], [date2, conseil1], [date3, conseil2] ... ]
+    nom_piece : [[date1, anomalie1], [date2, anomalie1], [date3, anomalie2] ... ]
     """
     
     names = list(data.keys())
@@ -277,30 +310,101 @@ def formatage_conseil(data: dict, data_freq: datetime.datetime, data_std: dateti
     for name in names:
         index = 1
         
-        analyse[name].append([data[name][index][0], "", data[name][index][1]])
-        
-        while index < len(data[name]):
-            if data[name][index][0] > data[name][index-1][0] + (data_freq - data_std) and \
-                data[name][index][0] < data[name][index-1][0] + (data_freq + data_std):
-                    
-                if not data[name][index][1] == data[name][index-1][1]:
+        if len(data[name]) > 0:
+            analyse[name].append([data[name][0][0], "", data[name][0][1]])
+            
+            while index < len(data[name]):
+                if data[name][index][0] > data[name][index-1][0] + (data_freq - data_std) and \
+                    data[name][index][0] < data[name][index-1][0] + (data_freq + data_std):
+                        
+                    if not data[name][index][1] == data[name][index-1][1]:
+                        analyse[name][-1][1] = data[name][index-1][0]
+                        analyse[name].append([data[name][index][0], "", data[name][index][1]])
+                else:
                     analyse[name][-1][1] = data[name][index-1][0]
                     analyse[name].append([data[name][index][0], "", data[name][index][1]])
-            else:
-                analyse[name][-1][1] = data[name][index-1][0]
-                analyse[name].append([data[name][index][0], "", data[name][index][1]])
+                    
+                index += 1
                 
-            index += 1
-            
-        analyse[name][-1][1] = data[name][index-1][0]
+            analyse[name][-1][1] = data[name][index-1][0]
         
         
     """
     Format du tableau de sortie
-    piece : date début du conseil - date de fin du conseil - conseil
+    piece : date début du probleme - date de fin du probleme - probleme
     
     """        
     return analyse
+
+def index_to_display(full_data, start, end): 
+    if not end - start > 4:
+        if start == 0:
+            end = 7
+
+        elif start == 1:
+            start = 0
+            end += 3
+   
+        elif start ==  2:
+            start = 0
+            end += 3
+
+        elif end == (len(full_data)-1):
+            start -= 7
+
+        elif end == (len(full_data)-2):
+            end = (len(full_data)-1)
+            start -= 3
+
+        elif end == (len(full_data)-3):
+            end = (len(full_data)-1)
+            start -= 3
+
+        else:
+            start -= 3
+            end += 3 
+          
+    return start, end
+    
+def remodelage_analyse(full_data: pd.core.frame.DataFrame, analyse_anomalie: dict, freq, colonne_date: str):
+    freq_anomalie = {name: {} for name in analyse_anomalie.keys()}
+    
+    for name in analyse_anomalie.keys():
+        if len(analyse_anomalie[name]) > 0:
+            
+            index_start = full_data.loc[full_data[colonne_date] == analyse_anomalie[name][0][0]].index[0]
+            index_end = full_data.loc[full_data[colonne_date] == analyse_anomalie[name][0][1]].index[0]
+                    
+            index_start, index_end = index_to_display(full_data, index_start, index_end)
+            
+            freq_anomalie[name] = {analyse_anomalie[name][0][2] : [[full_data[colonne_date][index_start], full_data[colonne_date][index_end], analyse_anomalie[name][0][0], analyse_anomalie[name][0][1]]]}
+            
+            for index in range(1, len(analyse_anomalie[name])):
+                
+                name_anomalie = analyse_anomalie[name][index][2]
+                index_start = full_data.loc[full_data[colonne_date] == analyse_anomalie[name][index][0]].index[0]
+                index_end = full_data.loc[full_data[colonne_date] == analyse_anomalie[name][index][1]].index[0]
+                    
+      
+                index_start, index_end = index_to_display(full_data, index_start, index_end)
+                
+                if name_anomalie in freq_anomalie[name].keys():
+                    freq_anomalie[name][name_anomalie].append([full_data[colonne_date][index_start], full_data[colonne_date][index_end], analyse_anomalie[name][index][0], analyse_anomalie[name][index][1]])
+                    
+                else:
+                    freq_anomalie[name][name_anomalie] = [[full_data[colonne_date][index_start], full_data[colonne_date][index_end], analyse_anomalie[name][index][0], analyse_anomalie[name][index][1]]]
+    
+
+    #convert in dataframe
+    for name in freq_anomalie.keys():
+        for anomalie in freq_anomalie[name].keys():
+            freq_anomalie[name][anomalie] = pd.DataFrame( data = freq_anomalie[name][anomalie],  
+                                                        index = [i for i in range(len(freq_anomalie[name][anomalie]))],  
+                                                        columns = ["Display_Debut", "Display_Fin", "Debut", "Fin"])
+                    
+    return freq_anomalie
+      
+    
 
 #%%Retourne Error + Display
 
@@ -317,7 +421,7 @@ def is_error_occurs(data: pd.core.frame.DataFrame, hours_begin: datetime.datetim
     
     return data_hours
 
-def ratio_error_between_date(data: pd.core.frame.DataFrame, analyse_data: dict, name: str, conseil: str, date_start: datetime.datetime, date_end: datetime.datetime, colonne_date: str):
+def ratio_error_between_date(data: pd.core.frame.DataFrame, analyse_data: dict, name: str, anomalie: str, date_start: datetime.datetime, date_end: datetime.datetime, colonne_date: str):
     nb = 0
     total = 0
     
@@ -328,7 +432,7 @@ def ratio_error_between_date(data: pd.core.frame.DataFrame, analyse_data: dict, 
     for index in range(len(analyse_data[name])):
         
         if date_end >= analyse_data[name][index][0] >= date_start:
-            if conseil == analyse_data[name][index][1]:
+            if anomalie == analyse_data[name][index][1]:
                 nb += 1
      
     if total == 0:
@@ -337,7 +441,7 @@ def ratio_error_between_date(data: pd.core.frame.DataFrame, analyse_data: dict, 
     return nb/total
 
 
-def display(data:  pd.core.frame.DataFrame, analyse: dict, analyse_point: dict, name_room:str, confort_temp:float, gap_confort:float, colonne_date:str):
+def display(data: pd.core.frame.DataFrame, analyse: dict, analyse_point: dict, name_room:str, confort_temp:float, gap_confort:float, colonne_date:str):
     import matplotlib.pyplot as plt
     
     erreur_list=list(analyse.get(name_room))
@@ -355,7 +459,7 @@ def display(data:  pd.core.frame.DataFrame, analyse: dict, analyse_point: dict, 
             break
     
     if str(indice) == "A":
-        indice = 0
+        indice = np.random.randint(0, len(erreur_list)-1)
     
     data_error_occurs = is_error_occurs(data, erreur_list[indice][0], erreur_list[indice][1], colonne_date)
 
@@ -378,9 +482,70 @@ def display(data:  pd.core.frame.DataFrame, analyse: dict, analyse_point: dict, 
     
     ratio = ratio_error_between_date(data, analyse_point, name_room, erreur_list[indice][2], erreur_list[indice][0], erreur_list[indice][1], colonne_date)
     
+    analyse[name_room][indice].append(ratio)
+    
     print("Debut - Fin :", erreur_list[indice][0], "-", erreur_list[indice][1])
     print("Pourcentage d\'incident sur cette période {0:.1%}".format(ratio))
     print("Conseil : ", erreur_list[indice][2])
     
     
+#%%
+def format_to_send_csv(data: pd.core.frame.DataFrame, full_data: pd.core.frame.DataFrame, analyse: dict, analyse_point: dict, colonne_date: str):
     
+    #parcourir a et remplir
+    for name in analyse.keys():
+        for anomalie in analyse[name].keys():
+            for index in range(len(analyse[name][anomalie][0])):
+                ratio = ratio_error_between_date(full_data, analyse_point, name, anomalie, analyse[name][anomalie][0]['Debut'][index], analyse[name][anomalie][0]['Fin'][index], colonne_date)
+                
+                if (str(analyse[name][anomalie][0]['Debut'][index]) == data['Start']).any() and (str(analyse[name][anomalie][0]['Fin'][index]) == data['End']).any():
+                    truth_table = ((str(analyse[name][anomalie][0]['Debut'][index]) == data['Start']) & (str(analyse[name][anomalie][0]['Fin'][index]) == data['End']))
+                    data.loc[truth_table, name] = anomalie + '\n' + "{0:.1%}".format(ratio)
+                else:
+                    data = data.append({ name   : anomalie + '\n' + "{0:.1%}".format(ratio),
+                                         'Start' : str(analyse[name][anomalie][0]['Debut'][index]),
+                                          'End'   : str(analyse[name][anomalie][0]['Fin'][index]) }, 
+                                ignore_index=True)
+    
+    data = data.sort_values(by=['Start', 'End']).reset_index(drop=True)
+    
+    return data
+
+def format_to_send_json(analyse_format:list, analyse_open: dict, analyse_close: dict):
+    #On convertit nos dataframe en dict
+    for name in analyse_open.keys():
+        for anomalie in analyse_open[name].keys():
+            analyse_open[name][anomalie] = analyse_open[name][anomalie].astype(str).to_dict(orient='index')
+        
+        if name in analyse_close.keys(): 
+            for anomalie in analyse_close[name].keys():
+                analyse_close[name][anomalie] = analyse_close[name][anomalie].astype(str).to_dict(orient='index')
+                
+    #On convertit notre dict dans le format souhaité par le site
+    for name in analyse_open.keys():
+        anomalie_info = list()
+        for anomalie in analyse_open[name].keys():
+            date_observation = list()
+            for indice in analyse_open[name][anomalie].keys():
+                date_observation.append({"display_Debut": analyse_open[name][anomalie][indice]["Display_Debut"],
+                                        "display_Fin": analyse_open[name][anomalie][indice]["Display_Fin"],
+                                        "debut": analyse_open[name][anomalie][indice]["Debut"],
+                                        "fin": analyse_open[name][anomalie][indice]["Fin"]})
+    
+            anomalie_info.append({"nom": anomalie, "liste": date_observation})
+        
+        if name in analyse_close.keys(): 
+            for anomalie in analyse_close[name].keys():
+                date_observation = list()
+                for indice in analyse_close[name][anomalie].keys():
+                    date_observation.append({"display_Debut": analyse_close[name][anomalie][indice]["Display_Debut"],
+                                            "display_Fin": analyse_close[name][anomalie][indice]["Display_Fin"],
+                                            "debut": analyse_close[name][anomalie][indice]["Debut"],
+                                            "fin": analyse_close[name][anomalie][indice]["Fin"]})
+        
+                anomalie_info.append({"nom": anomalie, "liste": date_observation})
+                
+        analyse_format.append({"salle": name, "anomalie": anomalie_info})
+  
+    
+    return analyse_format

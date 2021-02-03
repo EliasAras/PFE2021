@@ -6,119 +6,125 @@ Created on Tue Jan  5 12:49:40 2021
 @author: elias
 """
 
-import pandas as pd
-import datetime
-import numpy as np
-import matplotlib.pyplot as plt
+def analyse(originalCSV: list, schemaJSON: list, DaysOPEN: list, HoursOPEN: list):
 
-from functions import *
-
-DATE_COLONNE = "Date (Europe/Paris)"
-TEMP_EXT = "T°C ext"
-
-#%% Formatage
-# Read CSV file into DataFrame df
-df = pd.read_csv('/Users/elias/Desktop/PFE/GitHub/PFE2021/LCSC-03_12_2020 08_00_00.csv', delimiter=";")
-
-# Show dataframe
-name_capteur = df.columns.values.tolist()
-del name_capteur[0], name_capteur[0]
-
-for index in range(len(df)): 
-    df[DATE_COLONNE][index] = datetime.datetime.strptime(df[DATE_COLONNE][index], '%d/%m/%Y %H:%M:%S')
+    assert len(originalCSV) > 1, "originalCSV attend une ligne avec les headers(titre des colonnes) et une ligne de données au minimum"
+    assert len(schemaJSON) > 0, "schemaJSON ne doit pas être vide"
+    assert len(DaysOPEN) == 7, "Taille DaysOPEN doit être égale à 7" 
+    assert len(HoursOPEN) == 2, "Taille HoursOPEN doit être égale à 2 [Horaire ouverture, Horaire Fermeture]"   
+    
+    #### Bibliotheque
+    import pandas as pd
+    import datetime
+    import numpy as np
+    import json
+    
+    import functions as fct
+    
+    DATE_COLONNE = "Date (Europe/Paris)"
+    TEMP_EXT = "T°C ext"  
+    CHGT_HORAIRE = "Heure d'été / Heure d'hiver"
+    
+    #### Formatage
+    df = list()
+    
+    for line in originalCSV:
+        df.append(line.split(";"))
+        
+    del line
+    
+    df = pd.DataFrame( data = df[1:],  
+                      index = [index for index in range(len(df)-1)],  
+                      columns = df[0])
+    
+    ####Recuperation de certaine donnees du batiement
+    association = json.loads(schemaJSON)
+    
+    map_association =   {elem['Room']:elem['Circuit'] for elem in association}
+    map_unite       =   {elem['Room']:elem['Physic'] for elem in association}
+    #map_confort    =   {elem['Room']:float(elem['IdealPhysic']) for elem in association}
+    map_confort    =   {elem['Room']:20 for elem in association}
+    gap_to_confort  =   {elem['Room']:0.01 for elem in association}
+       
+                 
+    #### On cast nos données afin de pouvoir les utiliser
+    name_capteur = df.columns.values.tolist()
+    del name_capteur[0], name_capteur[0]
+    
+    df[DATE_COLONNE] = pd.to_datetime(df[DATE_COLONNE], format = '%d/%m/%Y %H:%M')
     
     for name in name_capteur:
-        #remove ,
-        value = df[name][index].replace(',' , '.') 
-        df[name][index] = float(value)
-
-del index, name, value, name_capteur
-
-#%%
-
-frequence, standard_deviation = frequency_std_database(df[DATE_COLONNE])
-standard_deviation = datetime.timedelta(days=8)
-#%%   
-#df.plot.line(x = DATE_COLONNE, y = name_capteur)
-
-#%%Personnalisation des datas
-
-horaire_ouverture = datetime.datetime.strptime("07:00:00", '%H:%M:%S')
-horaire_fermeture = datetime.datetime.strptime("19:00:00", '%H:%M:%S')
-
-vacance_debut = datetime.datetime.strptime("21/12/2019", '%d/%m/%Y')
-vacance_fin = datetime.datetime.strptime("05/01/2020", '%d/%m/%Y')
-
-#For the days open
-days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-days_open = [True, True, True, True, True, False, False]
-days_closed = ~np.array(days_open)
-
-days_open = np.array(days)[np.array(days_open)].tolist()
-days_closed = np.array(days)[np.array(days_closed)].tolist()
-
-data_open_hours = is_open_day(df, days_closed, [], [], [], DATE_COLONNE)
-data_open_hours = is_open_hours(data_open_hours, horaire_ouverture, horaire_fermeture, DATE_COLONNE)
-
-#separer les données avant ouverture du batiment et fermeture totale du batiment (vacances)
-data_closed_hours, data_closed_days = closed(df, data_open_hours[DATE_COLONNE].tolist(), DATE_COLONNE)
-data_per_week_per_hours = segmentation_semaine(data_closed_hours, horaire_ouverture, horaire_fermeture, DATE_COLONNE)
-
-del days, days_open, days_closed
-#%%
-temp_room = ['Réfectoire primaire',
-             'Salle B.1.3',
-             'Salle B.2.2',
-             'Salle A.2.1',
-             'Salle A.1.1',
-             'Salle des maitres',
-             'Salle Maternelle 2 RDC',
-             'Salle Maternelle 3 1° étage',
-             'Salle motricité 1° étage']
-
-"""
-Il faudra detecter le type de chaque colonne
-"""
-
-#%% Moving average 
+        df[name] = df[name].str.replace(',' , '.').astype(float)
     
-#use n previous periods to calculate moving average 
-n=7*24
+    del name, name_capteur
+    
+    
+    ####On recupere la liste des salles
+    ListeSalle = list()
 
-moving_average_room = moving_average(data_open_hours[temp_room], n)
-moving_average_exterieur = moving_average(data_open_hours[TEMP_EXT], n)
-moving_average_time = data_open_hours[DATE_COLONNE][(n-1):]
-
-#On analyse les movings average
-moving_average_time = moving_average_time.values
-#Reshape pour avoir un tableau en 2D (nb_data, 1)
-moving_average_time = np.reshape(moving_average_time, (moving_average_time.shape[0], 1))
-moving_average_analyse = np.concatenate((moving_average_time, moving_average_room, moving_average_exterieur), axis=1)
-
-moving_average_analyse = pd.DataFrame(data = moving_average_analyse,  
-                                      index = [i for i in range(len(moving_average_analyse))],  
-                                      columns = [DATE_COLONNE] + temp_room + [TEMP_EXT])
-
-del moving_average_time, moving_average_room, moving_average_exterieur
-#%% Analyse des donées avec consels
-"""Ouverture"""
-
-#Provisoire
-temp_confort = {name:20 for name in df.columns}
-gap_to_confort = {name:0.05 for name in df.columns}
-
-#analyse_data_by_point = analyse_temperature_point(moving_average_analyse, temp_confort, gap_to_confort)
-analyse_data_by_point_open = analyse_temperature_point(data_open_hours[[DATE_COLONNE] + temp_room+ [TEMP_EXT]], temp_confort, gap_to_confort, conseil_open, TEMP_EXT, DATE_COLONNE)
-analyse_data_by_point_holidays = analyse_temperature_point(data_closed_hours[[DATE_COLONNE] + temp_room+ [TEMP_EXT]], temp_confort, gap_to_confort, conseil_closed, TEMP_EXT, DATE_COLONNE)
-
-analyse_data_open = formatage_conseil(analyse_data_by_point_open, frequence, standard_deviation)
-analyse_data_holidyas = formatage_conseil(analyse_data_by_point_holidays, frequence, standard_deviation)
-
-
-#%%
-
-#%%
+    for elem in association:
+        add = True
+        for elem_comp in association:
+            if elem['Room'] == elem_comp['Circuit']:
+                add = False
+                break
+        if add:
+            if not elem['Room'] in [DATE_COLONNE, CHGT_HORAIRE, TEMP_EXT]:
+                ListeSalle.append(elem['Room'])   
         
-name = "Salle A.2.1"
-display(data_open_hours, analyse_data_open, analyse_data_by_point_open, name, temp_confort[name], gap_to_confort[name], DATE_COLONNE)
-display(data_closed_days, analyse_data_holidyas, analyse_data_by_point_holidays, name, temp_confort[name], gap_to_confort[name], DATE_COLONNE)
+    #### On fixe notre ecart type afin de liser nos anomalies plus tard
+    frequence, standard_deviation = fct.frequency_std_database(df[DATE_COLONNE])
+    standard_deviation = datetime.timedelta(days=8)
+    
+    ####Personnalisation des datas    
+    horaire_ouverture = datetime.datetime.strptime(HoursOPEN[0], '%H:%M:%S')
+    horaire_fermeture = datetime.datetime.strptime(HoursOPEN[1], '%H:%M:%S')
+    
+    #Filtre nos données en fonction des parametres du batiement
+    days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    
+    #On inverse notre tableau de boolean
+    days_closed = ~np.array(DaysOPEN)
+    
+    #On recupere 
+    days_open = np.array(days)[np.array(DaysOPEN)].tolist()
+    days_closed = np.array(days)[np.array(days_closed)].tolist()
+    
+    #On filtre nos données en fonction de si le batiment est ouvert
+    data_open_hours = fct.is_open_day(df, days_closed, [], [], [], DATE_COLONNE)
+    data_open_hours = fct.is_open_hours(data_open_hours, horaire_ouverture, horaire_fermeture, DATE_COLONNE)
+    
+    #On separe les données avant ouverture du batiment et fermeture totale du batiment (vacances)
+    data_pre_open_post_closed, data_closed_days = fct.closed(df, data_open_hours[DATE_COLONNE].tolist(), DATE_COLONNE)
+    #data_pre_open_post_closed = fct.segmentation_semaine(data_pre_open_post_closed, horaire_ouverture, horaire_fermeture, DATE_COLONNE)
+    
+    #data_pre_open_post_closed is remove because it not needed for now
+    del days, days_open, days_closed, data_pre_open_post_closed
+
+    ####Analyse chaque donée en detectant le probleme
+    analyse_data_by_point_open = fct.analyse_temperature_point(df, data_open_hours[[DATE_COLONNE] + ListeSalle + [TEMP_EXT]], ListeSalle, map_confort, gap_to_confort, fct.anomalie_open, TEMP_EXT, DATE_COLONNE, map_association)
+    analyse_data_by_point_holidays = fct.analyse_temperature_point(df, data_closed_days[[DATE_COLONNE] + ListeSalle+ [TEMP_EXT]], ListeSalle, map_confort, gap_to_confort, fct.anomalie_closed, TEMP_EXT, DATE_COLONNE, map_association)
+    
+    ####Restructuration des problemes releves afin de donner une période
+    analyse_data_open = fct.formatage_probleme(analyse_data_by_point_open, frequence, standard_deviation)
+    analyse_data_holidyas = fct.formatage_probleme(analyse_data_by_point_holidays, frequence, standard_deviation)
+    
+    ####
+    analyse_anomalie_data_open = fct.remodelage_analyse(df, analyse_data_open, frequence, DATE_COLONNE) 
+    analyse_anomalie_data_holidays = fct.remodelage_analyse(df, analyse_data_holidyas, frequence, DATE_COLONNE) 
+    
+    full_analyse = fct.format_to_send_json(list(), analyse_anomalie_data_open, analyse_anomalie_data_holidays)
+    
+    return json.dumps(full_analyse)
+
+d = ["Date (Europe/Paris);Heure d\'été / Heure d\'hiver;Cpt gaz;Circuit maternelle;Circuit école primaire;Circuit réfectoire;T°C ext;Réfectoire primaire;Salle B.1.3;Salle B.2.2;Salle A.2.1;Salle A.1.1;Salle des maitres;Salle Maternelle 2 RDC;Salle Maternelle 3 1° étage;Salle motricité 1° étage", "02/12/2019 01:00;Heure d\'hiver;2,7;20,2;19;41,4;3,6;15,3;17,4;14,9;15,7;15,8;16,3;17,9;18,3;17,7", "03/12/2019 01:00;Heure d\'hiver;1,3;19,8;18,4;41,8;3,4;15,1;16,9;14,6;15,4;15,4;16;17,5;17,9;17,3", "03/12/2019 02:00;Heure d\'hiver;2,6;19,5;16,7;42,2;2,9;14,9;16,5;14,4;15,1;15,2;15,7;17,2;17,5;16,9", "03/12/2019 03:00;Heure d\'hiver;12,4;25,5;26,3;42,1;2,9;14,8;16,2;14,1;14,8;14,9;15,4;16,9;17,2;16,6", "03/12/2019 04:00;Heure d\'hiver;32,8;51,6;57,2;43,4;2,8;14,9;16,3;14,2;15,3;15,4;15,6;17;17,1;16,6", "03/12/2019 05:00;Heure d\'hiver;23;57,3;61,1;42,2;2,6;15,4;16,8;14,7;16,5;16,2;16,2;17,8;17,4;17,2", "03/12/2019 06:00;Heure d\'hiver;23,1;58,4;61,5;42,4;2,4;15,6;17,1;15,1;17,1;16,6;16,6;18,4;17,6;17,5", "03/12/2019 07:00;Heure d\'hiver;23;60,2;59,4;53,2;2,3;16;17,3;15,4;17,4;16,9;16,9;18,9;17,9;17,8", "03/12/2019 08:00;Heure d\'hiver;23;62,1;58,4;52,7;2,5;16,6;17,6;15,6;17,6;17,2;17,4;19,5;18,4;18,2", "03/12/2019 09:00;Heure d\'hiver;21,4;61,8;57,6;51,9;2,6;17;18,2;16,1;17,7;18,2;17,7;20,6;19,1;18,8", "03/12/2019 10:00;Heure d\'hiver;21,5;60,2;56,7;50,9;2,7;17,4;18,7;16,4;17,9;18,9;17,9;21;19,2;19,1", "03/12/2019 11:00;Heure d\'hiver;19,8;59,7;56,1;50;2,9;17,6;19,2;16,8;18;19,4;18,1;20,9;19,5;19,4", "03/12/2019 12:00;Heure d\'hiver;20;59,2;55,4;49,6;3,2;17,6;19,4;16,9;18;19,3;18,6;20,8;19,6;19,6", "03/12/2019 13:00;Heure d\'hiver;21,4;57,6;54,3;49;3,6;17,5;19,5;16,9;18,3;19,3;18,9;20,9;19,7;19,7", "03/12/2019 14:00;Heure d\'hiver;21,6;58,2;55;49,2;3,8;16,6;20;17,2;18,3;19,8;18,8;21,4;20;19,9", "03/12/2019 15:00;Heure d\'hiver;19,5;58,8;55,5;46,3;4;17,1;20,3;17,5;18,3;20;18,9;21,8;20,3;20", "03/12/2019 16:00;Heure d\'hiver;18,9;59,1;55,9;38,6;4,1;17,1;20,6;17,6;18,4;19,7;18,9;22;20,5;20,2", "03/12/2019 17:00;Heure d\'hiver;7,8;55,4;43,6;37,2;3,7;16,8;20,5;17,6;18,2;19,4;18,8;21,9;20,6;20,3", "03/12/2019 18:00;Heure d\'hiver;2,5;44,8;31,1;37,3;3,3;16,5;20;17,1;17,6;18,6;18;21,5;20,5;20,3", "03/12/2019 19:00;Heure d\'hiver;1,4;40,2;25,9;38,1;2,9;16,2;19,4;16,3;17;17,8;17,5;20,7;20;19,8", "03/12/2019 20:00;Heure d\'hiver;2,6;38,5;23,5;37,7;3;15,9;18,8;15,7;16,5;17,2;17,1;19,7;19,4;19,1", "03/12/2019 21:00;Heure d\'hiver;2,7;35,1;22;37,8;3;15,7;18,3;15,4;16,1;16,8;16,8;19,1;19;18,6", "03/12/2019 22:00;Heure d\'hiver;0,1;28;20,2;37,8;3,2;15,4;17,9;15,1;15,8;16,4;16,5;18,6;18,6;18,3", "03/12/2019 23:00;Heure d\'hiver;2,5;24,5;19,4;38,2;3,3;15,3;17,4;14,9;15,5;16;16,2;18,2;18,2;17,9", "04/12/2019 00:00;Heure d\'hiver;1,2;23,6;18,8;37,9;3,2;15;17;14,6;15,3;15,6;15,9;17,9;17,9;17,6", "04/12/2019 01:00;Heure d\'hiver;1,4;23,4;18,3;38,5;2,8;14,9;16,6;14,4;15;15,3;15,6;17,6;17,5;17,2", "04/12/2019 02:00;Heure d\'hiver;2,6;23,2;18,1;39;2,6;14,7;16,3;14,2;14,8;15;15,4;17,3;17,3;16,9", "04/12/2019 03:00;Heure d\'hiver;8,1;29,3;21,8;39,1;2,4;14,6;15,9;14;14,6;14,7;15,2;17,1;17;16,6", "04/12/2019 04:00;Heure d\'hiver;32,5;51,8;55,2;39,7;2,1;14,4;16;14,1;14,9;15,1;15,3;17,1;16,9;16,7", "04/12/2019 05:00;Heure d\'hiver;23;58,3;61,1;38,9;1,8;14,4;16,6;14,5;16,1;16;16;18;17,2;17,2", "04/12/2019 06:00;Heure d\'hiver;21,4;61,4;58,6;39,5;1,6;14,3;16,9;15;16,8;16,5;16,5;18,8;17,5;17,6", "04/12/2019 07:00;Heure d\'hiver;23,1;61,2;57,4;50,5;1,6;14,6;17,1;15,2;17;16,7;16,8;19,4;17,9;18", "04/12/2019 08:00;Heure d\'hiver;23;62,2;58,1;51,3;1,3;15,4;17,3;15,4;17,1;16,9;17;19,8;18,2;18,4", "04/12/2019 09:00;Heure d\'hiver;21,5;61,3;57,9;51,8;1,4;15,9;17,5;15,5;17,3;17,1;17,3;20,1;18,5;18,6", "04/12/2019 10:00;Heure d\'hiver;17,8;58;52,8;51,6;1,9;16,2;17,7;15,7;17,4;17,3;17,5;20,3;18,7;18,9", "04/12/2019 11:00;Heure d\'hiver;19,8;58,5;51,9;51,1;2,7;16,6;18,1;16,1;17,7;17,5;17,7;20,5;19;19,1", "04/12/2019 12:00;Heure d\'hiver;19,6;58,5;51,3;51;3,6;17;19,5;18;19,2;17,9;18;20,7;19,2;19,4", "04/12/2019 13:00;Heure d\'hiver;17,9;57,9;50,7;49,9;4,3;16,7;21;20,1;20,2;18,2;18,2;20,9;19,4;19,6", "04/12/2019 14:00;Heure d\'hiver;18,1;57,1;50,6;49,7;4,8;16,4;21,1;20,9;19,9;18,6;18,5;21,3;19,5;19,8", "04/12/2019 15:00;Heure d\'hiver;19,3;57;50,9;47,3;5;16,9;20,8;19,7;19,2;18,4;18,5;21,6;19,8;19,8", "04/12/2019 16:00;Heure d\'hiver;17,9;58,3;51,8;38,9;4,3;16,8;20,6;18,6;18,7;18,3;18,4;21,6;19,8;19,9", "04/12/2019 17:00;Heure d\'hiver;3,2;45,9;40,3;40;3,7;16,4;20,5;17,9;18,2;18,1;18,3;21,4;19,8;19,8", "04/12/2019 18:00;Heure d\'hiver;2,7;33,1;28,9;40,7;3,1;16,1;19,9;17,1;17,4;17,6;17,7;20,7;19,4;19,4", "04/12/2019 19:00;Heure d\'hiver;2,6;30,7;25,6;41,4;2,7;15,8;19,1;16,4;16,7;16,8;17;19,7;18,8;18,6", "04/12/2019 20:00;Heure d\'hiver;2,6;28,8;24,2;42,1;1,8;15,5;18,3;15,8;16,2;16,2;16,5;18,8;18,3;18", "04/12/2019 21:00;Heure d\'hiver;2,8;27,3;21,4;42,6;0,7;15,2;17,7;15,4;15,8;15,8;16,1;18,2;17,9;17,5", "04/12/2019 22:00;Heure d\'hiver;1,3;25,9;20;42,4;0,9;15;17,2;15,1;15,4;15,6;15,7;17,7;17,5;17", "04/12/2019 23:00;Heure d\'hiver;2,4;24,3;17,9;42,7;0,5;14,8;16,7;14,8;15,1;15,3;15,4;17,3;17,1;16,7", "05/12/2019 00:00;Heure d\'hiver;2,7;17,9;15,6;42,4;0,1;14,5;16,3;14,5;14,8;15;15,1;17,1;16,9;16,4", "05/12/2019 01:00;Heure d\'hiver;1,3;17,7;17,7;43,4;-0,3;14,3;15,8;14,2;14,5;14,7;14,8;16,8;16,6;16,1", "05/12/2019 02:00;Heure d\'hiver;3,4;17,5;18,1;43,4;-0,5;14,2;15,4;13,9;14,2;14,4;14,5;16,4;16,3;15,8", "05/12/2019 03:00;Heure d\'hiver;23,6;34,8;36,9;43,5;-0,8;14,5;15,1;13,7;13,9;14,1;14,3;16,2;16;15,6", "05/12/2019 04:00;Heure d\'hiver;29,1;55,3;59,7;43,9;-0,6;14,9;15,4;13,9;14,7;14,7;14,6;16,6;16,2;16", "05/12/2019 05:00;Heure d\'hiver;23,1;57,5;60,8;43,5;-0,1;15,1;15,9;14,4;15,8;15,5;15,3;17,4;16,4;16,5", "05/12/2019 06:00;Heure d\'hiver;22,9;60,9;56,4;42,7;0,4;15,3;16,2;14,8;16,3;15,9;15,7;18;16,7;16,8", "05/12/2019 07:00;Heure d\'hiver;21,5;60,3;54,8;52,8;0,7;15,6;16,4;15;16,4;16,1;16;18,6;17,1;17,3", "05/12/2019 08:00;Heure d\'hiver;21,6;60,4;55,4;54,7;0,7;16,1;16,6;15;16,4;16,3;16,3;19;17,4;17,6", "05/12/2019 09:00;Heure d\'hiver;21,4;59,3;54,4;54,2;0,9;16,3;16,8;15,3;16,5;16,5;16,5;19,3;17,7;18", "05/12/2019 10:00;Heure d\'hiver;21,4;58,9;54,1;53,5;1,2;16,4;17;15,6;16,6;16,7;16,7;19,5;17,9;18,3", "05/12/2019 11:00;Heure d\'hiver;19,8;58,2;53,9;52,8;1,4;16,6;17,3;15,7;16,7;16,9;16,9;19,7;18,2;18,6", "05/12/2019 12:00;Heure d\'hiver;19,9;57,6;53,1;52,4;1,5;16,7;17,4;15,7;16,8;17,1;17,3;19,9;18,4;18,7", "05/12/2019 13:00;Heure d\'hiver;19,9;57,5;53,1;52,5;1,6;16,9;17,5;15,7;16,9;17,3;17,6;20,1;18,5;18,8", "05/12/2019 14:00;Heure d\'hiver;21,7;57,6;52,6;52;1,7;17;17,6;15,9;17,1;17,4;17,4;20,4;18,7;18,9", "05/12/2019 15:00;Heure d\'hiver;19,9;57,5;53,5;49,6;1,8;17,2;17,7;16,3;17;17,4;17,4;20,5;18,8;19,1", "05/12/2019 16:00;Heure d\'hiver;19,9;57,9;53,3;40,3;1,7;17,1;17,8;16,5;17,1;17,5;17,5;20,6;18,9;19,3", "05/12/2019 17:00;Heure d\'hiver;3,3;46,3;42;40,8;1,6;16,5;17,7;16,3;16,9;17,4;17,3;20,5;19;19,2", "05/12/2019 18:00;Heure d\'hiver;1,4;41,8;30;40,7;1,6;16,1;17,3;15,5;16,3;16,9;16,5;19,7;18,6;18,8", "05/12/2019 19:00;Heure d\'hiver;2,7;39,1;24,9;40,3;1,6;15,8;16,7;14,9;15,7;16,4;15,9;18,7;18,1;18,3", "05/12/2019 20:00;Heure d\'hiver;2,7;31,5;22,6;40,7;1,5;15,5;16,2;14,5;15,3;15,8;15,5;18,1;17,6;17,8", "05/12/2019 21:00;Heure d\'hiver;2,7;27,5;21,2;41,5;1,5;15,2;15,8;14,1;14,9;15,3;15,1;17,6;17,2;17,3", "05/12/2019 22:00;Heure d\'hiver;1,2;25,6;19,4;40,8;1,5;14,9;15,4;13,8;14,5;15;14,8;17,2;16,8;17", "05/12/2019 23:00;Heure d\'hiver;2,6;19,4;16,3;41,6;1,4;14,7;15;13,6;14,2;14,7;14,5;16,9;16,5;16,6", "06/12/2019 00:00;Heure d\'hiver;3,2;18,4;16,9;41,9;1;14,4;14,7;13,3;13,9;14,4;14,3;16,6;16,2;16,2", "06/12/2019 01:00;Heure d\'hiver;3,9;18,4;19,6;41,9;1;14,2;14,3;13,1;13,6;14,1;14;16,4;15,9;15,8", "06/12/2019 02:00;Heure d\'hiver;2,6;18,3;15,9;41,8;1,1;14;14;12,9;13,4;13,8;13,8;16,1;15,7;15,5", "06/12/2019 03:00;Heure d\'hiver;18,4;37;26,9;41,8;1,3;13,8;13,8;12,7;13,2;13,6;13,6;15,9;15,5;15,3", "06/12/2019 04:00;Heure d\'hiver;30,4;54,1;58,7;42,3;1,7;14,2;14,1;12,9;13,9;14,1;13,9;16,2;15,6;15,6", "06/12/2019 05:00;Heure d\'hiver;23,1;56,6;60,2;41;2,1;14,6;14,8;13,5;15,2;15;14,7;17;15,9;16,1", "06/12/2019 06:00;Heure d\'hiver;21,4;58,9;55,3;41,3;2,5;14,7;15,1;13,9;15,8;15,4;15,2;17,7;16,2;16,5", "06/12/2019 07:00;Heure d\'hiver;21,4;57,7;53,6;51,6;2,9;15,1;15,3;14,1;15,8;15,6;15,4;18,2;16,5;16,9", "06/12/2019 08:00;Heure d\'hiver;19,8;57,1;53,4;52,5;3,4;15,7;15,5;14,2;15,9;15,8;15,8;18,7;16,9;17,2", "06/12/2019 09:00;Heure d\'hiver;19,8;56,4;52,5;51,3;4;16,1;15,8;14,6;15,9;16;16;19,4;17,7;17,6", "06/12/2019 10:00;Heure d\'hiver;19,6;56,1;51,6;50,8;4,5;16,6;16;14,9;16;16,2;16,1;19,7;18;17,9", "06/12/2019 11:00;Heure d\'hiver;19,7;55,2;50,9;50,2;4,7;17;16,1;15,1;16,1;16,4;16,2;19,6;18,4;18,2", "06/12/2019 12:00;Heure d\'hiver;18,2;54,7;51,3;50,3;4,7;17,5;16,2;15;16,2;16,5;16,7;19,6;18,3;18,4", "06/12/2019 13:00;Heure d\'hiver;20;55;51,1;49,9;4,7;17,8;16,3;14,8;16,2;16,6;16,8;19,8;18,3;18,5", "06/12/2019 14:00;Heure d\'hiver;19,8;54,8;51,3;50,1;4,8;16,4;16,6;15,1;16,2;16,7;16,8;20,2;18,7;18,6", "06/12/2019 15:00;Heure d\'hiver;17,9;54,1;50,3;46,9;5,3;16,6;17;15,4;16,3;16,8;16,9;20,4;19;18,7", "06/12/2019 16:00;Heure d\'hiver;15,8;53,2;49,1;39,3;5,9;16,7;17,3;15,5;16,4;16,9;16,9;20,6;19,2;18,9", "06/12/2019 17:00;Heure d\'hiver;3,2;43,2;39,3;38;6,8;16,3;17,2;15,4;16,3;16,9;16,9;20,6;19,1;18,9", "06/12/2019 18:00;Heure d\'hiver;1,4;39,6;28,8;37,6;7,7;16;16,8;14,9;15,8;16,5;16,5;19,9;18,8;18,6", "06/12/2019 19:00;Heure d\'hiver;2,6;36,8;24,3;37,2;8,4;15,7;16,4;14,4;15,4;16,2;16;19;18,4;18,2", "06/12/2019 20:00;Heure d\'hiver;1,3;29,4;22,3;37,1;9,1;15,5;16,1;14,1;15;15,8;15,8;18,4;18;17,8", "06/12/2019 21:00;Heure d\'hiver;2,7;26,1;20,9;37,2;9,4;15,3;15,9;13,9;14,7;15,5;15,5;18,1;17,6;17,6", "06/12/2019 22:00;Heure d\'hiver;1,3;25,1;20,1;37,3;9,5;15,1;15,7;13,8;14,5;15,3;15,3;17,8;17,4;17,3", "06/12/2019 23:00;Heure d\'hiver;2,7;24,6;19,5;37,4;9,5;14,9;15,5;13,7;14,3;15,1;15,2;17,5;17,1;17,1", "07/12/2019 00:00;Heure d\'hiver;0;24,3;18,4;37,6;9,4;14,8;15,3;13,5;14,2;14,9;15,1;17,3;16,9;16,8", "07/12/2019 01:00;Heure d\'hiver;1,3;22,5;17,5;37,7;9,4;14,6;15,1;13,4;14;14,7;15;17,2;16,7;16,6", "07/12/2019 02:00;Heure d\'hiver;1,2;21;17,2;37,6;9,4;14,5;15;13,3;13,9;14,5;14,8;17;16,5;16,4", "07/12/2019 03:00;Heure d\'hiver;1,3;20,8;17,1;37,7;9,5;14,4;14,8;13,2;13,8;14,4;14,7;16,8;16,3;16,3", "07/12/2019 04:00;Heure d\'hiver;1,3;20,7;16,9;37,6;9,3;14,3;14,7;13,2;13,7;14,2;14,6;16,7;16,2;16,1", "07/12/2019 05:00;Heure d\'hiver;0,2;20,6;16,8;37,4;9,1;14,2;14,6;13,1;13,5;14,1;14,6;16,6;16;15,9", "07/12/2019 06:00;Heure d\'hiver;4;21,5;17,5;43,6;9,1;14,3;14,5;13;13,5;13,9;14,5;16,5;15,9;15,8", "07/12/2019 07:00;Heure d\'hiver;1,3;22,6;17,8;43,6;9;14,7;14,3;12,9;13,4;13,8;14,4;16,3;15,7;15,6", "07/12/2019 08:00;Heure d\'hiver;2,7;22,6;17,7;44,1;8,9;15;14,2;12,8;13,3;13,7;14,3;16,2;15,6;15,5", "07/12/2019 09:00;Heure d\'hiver;2,6;22,3;17,5;44,2;8,9;15,2;14,1;12,8;13,2;13,6;14,2;16,1;15,5;15,4", "07/12/2019 10:00;Heure d\'hiver;1,4;21,6;17,3;43,1;9,3;15,4;14,1;12,8;13,1;13,6;14,2;16;15,4;15,3", "07/12/2019 11:00;Heure d\'hiver;2,6;21,2;17,3;41,8;9,5;15,5;14;12,8;13,2;13,7;14,2;16;15,3;15,3", "07/12/2019 12:00;Heure d\'hiver;1,4;21;17,3;42,5;10,2;15,7;14,3;13,7;13,8;13,9;14,3;16;15,3;15,3", "07/12/2019 13:00;Heure d\'hiver;2,6;21;17,5;41,2;10,8;15,8;14,9;14,8;14,6;14,2;14,4;16;15,3;15,4", "07/12/2019 14:00;Heure d\'hiver;1,4;20,8;17,4;41,5;10,8;15,9;14,8;14,4;14,2;14;14,3;16;15,2;15,3", "07/12/2019 15:00;Heure d\'hiver;1,3;20,6;17,3;40,3;10,6;15,9;14,7;13,9;13,8;13,9;14,3;15,9;15,1;15,2", "07/12/2019 16:00;Heure d\'hiver;2,7;20,6;17,2;41,4;10,4;16;14,6;13,7;13,5;13,8;14,2;15,8;15;15,1", "07/12/2019 17:00;Heure d\'hiver;1,3;20,8;17,1;41,2;10,1;16,1;14,5;13,5;13,4;13,6;14,2;15,8;15;15", "07/12/2019 18:00;Heure d\'hiver;2,8;20,9;17,1;41,7;10;16,1;14,4;13,3;13,3;13,5;14,1;15,7;14,9;14,9", "07/12/2019 19:00;Heure d\'hiver;1,3;21;17;41,7;9,9;16,2;14,3;13,2;13,2;13,4;14;15,6;14,8;14,8", "07/12/2019 20:00;Heure d\'hiver;2,7;20,9;17;41,8;9,9;16,3;14,2;13,1;13,1;13,3;14;15,5;14,6;14,7", "07/12/2019 21:00;Heure d\'hiver;1,3;20,9;16,9;41,8;9,8;16,3;14,1;13;13;13,3;13,9;15,5;14,6;14,6", "07/12/2019 22:00;Heure d\'hiver;1,2;20,8;16,2;37,7;9,8;16,3;14;12,9;13;13,2;13,9;15,4;14,5;14,6", "07/12/2019 23:00;Heure d\'hiver;1,3;19,6;15,8;37,4;9,9;15,9;13,9;12,9;12,9;13,1;13,8;15,3;14,4;14,5", "08/12/2019 00:00;Heure d\'hiver;1,3;18,7;15,7;37,9;10,1;15,7;13,8;12,8;12,8;13,1;13,8;15,3;14,4;14,4", "08/12/2019 01:00;Heure d\'hiver;0;18,6;15,6;38,1;10,3;15,5;13,8;12,7;12,8;13;13,8;15,2;14,3;14,4", "08/12/2019 02:00;Heure d\'hiver;1,2;18,7;15,5;38;10,3;15,4;13,6;12,6;12,7;12,9;13,7;15,2;14,2;14,3", "08/12/2019 03:00;Heure d\'hiver;1,3;18,8;15,5;37,8;10,3;15,2;13,6;12,6;12,6;12,9;13,6;15,1;14,1;14,2", "08/12/2019 04:00;Heure d\'hiver;1,3;18,8;15,4;37,5;10,4;15;13,5;12,5;12,6;12,9;13,6;15,1;14,1;14,2", "08/12/2019 05:00;Heure d\'hiver;0;18,8;15,3;37,3;10,4;14,9;13,5;12,4;12,5;12,8;13,6;15;14;14,1", "08/12/2019 06:00;Heure d\'hiver;3;18,8;15,4;41,5;10,5;14,9;13,4;12,4;12,5;12,8;13,6;15;14;14,1", "08/12/2019 07:00;Heure d\'hiver;1,3;20,6;16,5;41;10,5;15,2;13,3;12,3;12,4;12,8;13,5;14,9;13,9;14", "08/12/2019 08:00;Heure d\'hiver;2,8;21,1;16,5;41,7;10,2;15,4;13,3;12,3;12,4;12,7;13,5;14,9;13,9;14", "08/12/2019 09:00;Heure d\'hiver;1,3;21,3;16,3;40,8;10,5;15,5;13,3;12,3;12,4;12,7;13,5;14,9;13,8;13,9", "08/12/2019 10:00;Heure d\'hiver;1,3;20,9;16,2;40,7;11;15,6;13,3;12,3;12,4;12,6;13,5;14,8;13,8;13,9", "08/12/2019 11:00;Heure d\'hiver;2,6;20,3;16,2;40,3;11,4;15,8;13,3;12,3;12,4;12,7;13,5;14,8;13,8;13,9", "08/12/2019 12:00;Heure d\'hiver;1,4;19,9;16,2;39,9;11,5;15,9;13,3;12,4;12,4;12,7;13,5;14,8;13,8;13,9", "08/12/2019 13:00;Heure d\'hiver;1,3;19,9;16,2;39,6;11,1;16;13,3;12,4;12,4;12,8;13,6;14,8;13,8;13,9", "08/12/2019 14:00;Heure d\'hiver;2,6;20;16,4;39,2;11,1;16;13,3;12,5;12,5;12,8;13,6;14,8;13,8;13,9", "08/12/2019 15:00;Heure d\'hiver;1,4;20,1;16,4;40,5;10,8;16,1;13,3;12,6;12,6;12,9;13,7;14,9;13,8;13,9", "08/12/2019 16:00;Heure d\'hiver;2,7;20,4;16,5;41,8;10,4;16,1;13,3;12,5;12,5;12,8;13,6;14,8;13,7;13,8", "08/12/2019 17:00;Heure d\'hiver;1,4;20,6;16,6;42,3;9,9;16,2;13,2;12,3;12,4;12,7;13,5;14,7;13,6;13,7", "08/12/2019 18:00;Heure d\'hiver;2,6;20,8;16,7;43,4;9,6;16,3;13,1;12,2;12,2;12,6;13,4;14,6;13,5;13,6", "08/12/2019 19:00;Heure d\'hiver;2,7;20,7;16,4;42,4;9,6;16,4;13;12,1;12,2;12,6;13,3;14,6;13,4;13,5", "08/12/2019 20:00;Heure d\'hiver;1,4;20,5;16,4;42,8;9,3;16,4;12,9;12;12,1;12,5;13,3;14,5;13,4;13,4", "08/12/2019 21:00;Heure d\'hiver;2,7;20,7;16,5;44,1;8,5;16,4;12,9;11,9;12;12,4;13,1;14,4;13,3;13,3", "08/12/2019 22:00;Heure d\'hiver;1,2;20,8;15,8;39,9;8,5;16,4;12,8;11,8;11,9;12,3;13;14,3;13,2;13,2", "08/12/2019 23:00;Heure d\'hiver;6,8;21,5;18,1;37,9;8,3;16,1;12,7;11,6;11,8;12,2;13;14,3;13,1;13,2", "09/12/2019 00:00;Heure d\'hiver;34,4;50;53,3;37,6;7,7;15,9;12,9;11,8;12,3;12,5;13,1;14,3;13,1;13,3", "09/12/2019 01:00;Heure d\'hiver;22,9;57,6;58,9;37,2;7,7;15,8;13,7;12,4;13,9;13,6;13,9;15,3;13,7;14", "09/12/2019 02:00;Heure d\'hiver;23;61,3;58,4;36,8;7,9;15,6;14,2;13;14,8;14,3;14,6;16,3;14,3;14,7", "09/12/2019 03:00;Heure d\'hiver;21,5;61,3;58;36,7;7,8;15,5;14,7;13,4;15,3;14,8;15;17,1;14,9;15,3", "09/12/2019 04:00;Heure d\'hiver;13,7;56,3;53,2;36,6;8;15,3;15,1;13,7;15,6;15,2;15,4;17,6;15,4;15,8", "09/12/2019 05:00;Heure d\'hiver;11,3;45,5;42,6;36,5;7,6;15,1;15,2;13,8;15,3;15,2;15,5;17,6;15,7;16", "09/12/2019 06:00;Heure d\'hiver;16,4;47,1;44,8;36,3;6,5;15;15,2;13,7;15;15,1;15,4;17,5;15,8;16", "09/12/2019 07:00;Heure d\'hiver;16;48,6;45,3;44,9;6,3;15,1;15,3;13,7;15;15,2;15,5;17,4;15,9;16,1", "09/12/2019 08:00;Heure d\'hiver;14,7;46,3;43,5;46,6;7;15,7;15,5;13,8;15,1;15,3;16;17,6;16,1;16,3", "09/12/2019 09:00;Heure d\'hiver;15,2;46;43,9;46,5;7,7;16,1;16,1;14,2;15,1;15,8;16;18,3;16,4;16,4", "09/12/2019 10:00;Heure d\'hiver;14,4;45,5;43,2;46,2;8,3;16,6;16,5;14,8;15,2;16,2;16,1;18,5;16,4;16,6", "09/12/2019 11:00;Heure d\'hiver;14,4;45,2;42,8;45,6;8,7;17,1;17;15,4;15,4;16,7;16,2;18,8;16,6;16,8", "09/12/2019 12:00;Heure d\'hiver;14,6;45,3;42,3;42,7;9,3;17,6;17,7;16,5;16,2;17;16,6;18,8;16,8;17", "09/12/2019 13:00;Heure d\'hiver;14,4;45,5;42,2;41,5;9,4;17,7;18,4;17,3;16,9;17,1;16,9;18,8;16,9;17,2", "09/12/2019 14:00;Heure d\'hiver;12,5;45,6;42,4;40,9;9,8;17,1;18,7;17,7;16,8;17,8;17;19,1;17,1;17,3", "09/12/2019 15:00;Heure d\'hiver;12,9;44,7;42,6;41,5;9,8;17,1;19;17,4;16,7;18,1;17;19,3;17,3;17,4", "09/12/2019 16:00;Heure d\'hiver;13,6;44,8;42,5;36,9;9,4;17;19,1;16,8;16,5;18,1;16,9;19,5;17,3;17,7", "09/12/2019 17:00;Heure d\'hiver;4,8;42,8;35,6;36,9;8,8;16,6;18,9;16,7;16,2;17,7;16,7;19,4;17,3;17,6", "09/12/2019 18:00;Heure d\'hiver;1,3;36,4;27,4;36,9;8,2;16,4;18,5;16,1;15,7;17;16,2;18,9;17,2;17,4", "09/12/2019 19:00;Heure d\'hiver;2,7;34,6;23,1;36,8;7,5;16,1;17,9;15,3;15,2;16,4;15,8;18,1;16,8;17", "09/12/2019 20:00;Heure d\'hiver;1,3;33,5;21,5;36,5;6,9;15,9;17,5;14,8;14,9;15,9;15,4;17,5;16,4;16,6", "09/12/2019 21:00;Heure d\'hiver;2,7;30;20,4;37,4;6,4;15,7;17,1;14,5;14,6;15,4;15,2;17;16,1;16,2", "09/12/2019 22:00;Heure d\'hiver;1,3;25;18,9;38,1;6;15,5;16,7;14,1;14,2;14,9;14,9;16,6;15,8;15,9", "09/12/2019 23:00;Heure d\'hiver;1,3;22;17,4;38,1;5,5;15,3;16,3;13,8;13,9;14,6;14,6;16,3;15,5;15,5", "10/12/2019 00:00;Heure d\'hiver;2,6;17,8;15,6;38,6;5,2;15,1;15,9;13,5;13,7;14,3;14,3;16;15,2;15,2", "10/12/2019 01:00;Heure d\'hiver;1,3;17,8;17,6;39,8;4,6;14,9;15,5;13,3;13,4;14;14,1;15,8;15;14,9", "10/12/2019 02:00;Heure d\'hiver;2,6;17,8;17,3;40,3;4,2;14,7;15,2;13;13,2;13,7;13,8;15,5;14,8;14,6", "10/12/2019 03:00;Heure d\'hiver;2,3;18,5;19,5;40,8;4;14,5;14,9;12,8;12,9;13,4;13,6;15,2;14,5;14,3", "10/12/2019 04:00;Heure d\'hiver;36;45,4;52,1;41,6;3,8;14,4;14,8;12,8;13,1;13,6;13,6;15,1;14,4;14,2", "10/12/2019 05:00;Heure d\'hiver;22,7;56,1;59,9;41,4;3,8;14,3;15,4;13,3;14,4;14,4;14,2;15,7;14,6;14,8", "10/12/2019 06:00;Heure d\'hiver;20,4;55,9;53,9;41,6;3,6;14,2;15,7;13,8;15,2;14,9;14,7;16,6;15;15,3", "10/12/2019 07:00;Heure d\'hiver;21,9;56,8;52,9;52,1;3,5;14,5;15,9;14;15,3;15;15;17,2;15,4;15,6", "10/12/2019 08:00;Heure d\'hiver;21,3;57,1;53,4;53,7;3,7;15,4;16;14,1;15,3;15,3;15,3;17,8;15,7;16", "10/12/2019 09:00;Heure d\'hiver;21,1;56;52,6;53,3;3,8;16;16,3;14,4;15,5;15,9;15,5;18,5;16;16,4", "10/12/2019 10:00;Heure d\'hiver;19,5;55,8;51,9;53;4,4;16,5;16,5;14,8;15,8;16,2;15,7;18,8;16,4;16,8", "10/12/2019 11:00;Heure d\'hiver;17,6;54,1;50,4;51,5;5,4;17,1;17;16;16,3;17;16;18,8;16,7;17,2", "10/12/2019 12:00;Heure d\'hiver;17,5;52,1;48,7;49,9;6,4;17,7;18;17,5;17,5;17,4;16,6;18,8;17;17,4", "10/12/2019 13:00;Heure d\'hiver;17,5;50,2;47,3;49,3;7;17,6;18,4;17,4;17,4;17,5;16,7;19;17,2;17,5", "10/12/2019 14:00;Heure d\'hiver;16,9;51;47,7;47,7;7,2;16,4;18,4;17,2;17,1;18,1;16,8;19,4;17,4;17,8", "10/12/2019 15:00;Heure d\'hiver;15,7;51,5;48,1;45,2;7,2;16,7;18,4;17,1;17,2;18,3;17;19,6;17,6;17,9", "10/12/2019 16:00;Heure d\'hiver;15,1;50,4;46,8;37,7;7,2;16,8;18,4;16,9;16,9;17,9;17;19,8;17,6;18,1", "10/12/2019 17:00;Heure d\'hiver;3,1;41,4;38,2;37,1;7,1;16,5;18,3;16,6;16,6;17,6;16,9;19,7;17,7;18,1", "10/12/2019 18:00;Heure d\'hiver;1,3;37,9;28,4;36,7;6,9;16,1;17,9;15,8;16,1;17,1;16,3;19;17,3;17,7", "10/12/2019 19:00;Heure d\'hiver;2,7;36;23,8;37;6,9;15,9;17,5;15,1;15,5;16,6;15,8;18,2;16,9;17,3", "10/12/2019 20:00;Heure d\'hiver;1,4;29,9;21,9;36,2;7,1;15,6;17,1;14,7;15,1;16,1;15,4;17,6;16,5;16,8", "10/12/2019 21:00;Heure d\'hiver;2,6;25,6;20,6;36,1;7,3;15,4;16,8;14,4;14,7;15,7;15,2;17,2;16,2;16,6", "10/12/2019 22:00;Heure d\'hiver;0;24,3;19,1;36,2;7,5;15,2;16,5;14,2;14,4;15,4;15;16,9;15,9;16,3", "10/12/2019 23:00;Heure d\'hiver;1,2;22,2;18,1;35,6;7,6;15;16,2;13,9;14,2;15,2;14,8;16,6;15,7;16", "11/12/2019 00:00;Heure d\'hiver;1,3;21,6;17,6;36,1;7,6;14,9;15,9;13,7;14;15;14,6;16,4;15,5;15,8", "11/12/2019 01:00;Heure d\'hiver;1,3;21,5;17,5;35,7;7,8;14,7;15,7;13,6;13,9;14,8;14,5;16,2;15,3;15,5", "11/12/2019 02:00;Heure d\'hiver;1,2;21,3;17,2;35,7;7,8;14,6;15,5;13,5;13,7;14,6;14,3;16,1;15,2;15,4", "11/12/2019 03:00;Heure d\'hiver;2,5;21;17;35,8;7,6;14,5;15,3;13,3;13,5;14,4;14,2;15,9;15;15,2", "11/12/2019 04:00;Heure d\'hiver;31,3;42,7;45,1;35,8;7,4;14,4;15,3;13,3;13,6;14,4;14,2;15,8;14,9;15,1", "11/12/2019 05:00;Heure d\'hiver;23,5;57,5;60,5;35,9;7,3;14,4;15,9;13,8;15;15,3;14,9;16,5;15,2;15,6", "11/12/2019 06:00;Heure d\'hiver;11,6;50,5;48,3;36;7,3;14,3;16,4;14,3;15,9;16;15,6;17,6;15,7;16,2"]
+e = '[{"Circuit":"Circuit maternelle","Room":"Date (Europe/Paris)","Physic":"T"},{"Circuit":"Circuit maternelle","Room":"Heure d\'été / Heure d\'hiver","Physic":"T"},{"Circuit":"Circuit maternelle","Room":"Cpt gaz","Physic":"T"},{"Circuit":"Circuit maternelle","Room":"Circuit maternelle","Physic":"T"},{"Circuit":"Circuit école primaire","Room":"Circuit école primaire","Physic":"T"},{"Circuit":"Circuit réfectoire","Room":"Circuit réfectoire","Physic":"T"},{"Circuit":"Circuit maternelle","Room":"T°C ext","Physic":"T"},{"Circuit":"Circuit réfectoire","Room":"Réfectoire primaire","Physic":"T"},{"Circuit":"Circuit maternelle","Room":"Salle B.1.3","Physic":"T"},{"Circuit":"Circuit maternelle","Room":"Salle B.2.2","Physic":"T"},{"Circuit":"Circuit maternelle","Room":"Salle A.2.1","Physic":"T"},{"Circuit":"Circuit maternelle","Room":"Salle A.1.1","Physic":"T"},{"Circuit":"Circuit école primaire","Room":"Salle des maitres","Physic":"T"},{"Circuit":"Circuit maternelle","Room":"Salle Maternelle 2 RDC","Physic":"T"},{"Circuit":"Circuit maternelle","Room":"Salle Maternelle 3 1° étage","Physic":"T"},{"Circuit":"Circuit école primaire","Room":"Salle motricité 1° étage","Physic":"T"}]'
+f = [True, True, True, True, True, False, False]
+g = ["07:00:00", "19:00:00"]
+
+import json
+
+a = analyse(d, e, f, g)
+a = json.loads(a)
+
+del d, e, f, g
